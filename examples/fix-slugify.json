@@ -1,0 +1,12 @@
+{
+  "id": "fix-slugify",
+  "prompt": "slugify() in slug.mjs is incomplete: `node test.mjs` fails. Fix slugify so every assertion in test.mjs passes. Do not edit test.mjs and do not change anything else.",
+  "repo": "../../warden-spike/arena-demo",
+  "checks": [{ "name": "tests", "cmd": "node test.mjs" }],
+  "maxUsdPerSubject": 1,
+  "subjects": [
+    { "name": "haiku",  "kind": "claude-code", "model": "haiku" },
+    { "name": "sonnet", "kind": "claude-code", "model": "sonnet" },
+    { "name": "opus",   "kind": "claude-code", "model": "opus" }
+  ]
+}

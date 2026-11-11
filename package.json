@@ -1,0 +1,49 @@
+{
+  "name": "agent-warden",
+  "version": "0.4.0",
+  "description": "A terminal coding agent for any model (Gemini, OpenRouter, Groq, Ollama, OpenAI, Anthropic), plus tools to review and compare coding agents.",
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "cli",
+    "terminal",
+    "llm",
+    "gemini",
+    "ollama",
+    "openrouter",
+    "agents",
+    "code-review"
+  ],
+  "license": "MIT",
+  "author": "Yash Honap",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yashhonap/warden.git"
+  },
+  "homepage": "https://github.com/yashhonap/warden#readme",
+  "bugs": {
+    "url": "https://github.com/yashhonap/warden/issues"
+  },
+  "type": "module",
+  "bin": {
+    "warden": "src/cli.mjs"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "daemon": "node src/cli.mjs daemon",
+    "watch": "node src/cli.mjs watch",
+    "test": "node test/meta.mock.mjs && node test/agent.mock.mjs && node test/models.mock.mjs && node test/providers.mock.mjs && node test/arena.mock.mjs && node test/harnesses.mock.mjs",
+    "build:standalone": "node scripts/build-standalone.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6"
+  }
+}

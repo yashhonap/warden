@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Warden</title>
+<style nonce="__NONCE__">
+  :root {
+    --bg:#050507; --surface:#0f0f13; --surface2:#16161c; --line:rgba(255,255,255,.08);
+    --text:#f5f5f7; --text2:#a1a1aa; --text3:#6b6b76;
+    --violet:#7c5cff; --sky:#38bdf8; --mint:#34f5b5; --amber:#ffb020; --red:#ff4d5e;
+    --aurora:linear-gradient(90deg,#7c5cff,#38bdf8,#34f5b5);
+    --mono:ui-monospace,"Geist Mono","JetBrains Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,"Geist",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:28px;padding:14px 24px;background:rgba(5,5,7,.8);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+  .logo{font-weight:600;font-size:17px;letter-spacing:-.02em}
+  .logo b{background:var(--aurora);-webkit-background-clip:text;background-clip:text;color:transparent}
+  nav{display:flex;gap:4px}
+  nav a{padding:6px 12px;border-radius:999px;color:var(--text2)} nav a.on{background:var(--surface2);color:var(--text)}
+  .spacer{flex:1} .meta{color:var(--text3);font-size:12px;font-family:var(--mono)}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--text3);margin-right:6px}
+  .dot.live{background:var(--mint);box-shadow:0 0 8px var(--mint)} .dot.run{background:var(--sky)} .dot.stop{background:var(--text3)}
+  main{max-width:1320px;margin:0 auto;padding:24px}
+  .grid{display:grid;grid-template-columns:360px 1fr;gap:20px;align-items:start}
+  .grid>*,.stack>*{min-width:0} h3,.t2,.mono,.finding{overflow-wrap:anywhere}
+  @media(max-width:1000px){.grid{grid-template-columns:1fr} main{padding:16px}}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px}
+  h2{font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin:0 0 12px}
+  h3{font-size:15px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+  .stack{display:flex;flex-direction:column;gap:16px}
+  .item{display:block;padding:12px;border-radius:12px;border:1px solid transparent;cursor:pointer}
+  .item:hover{background:var(--surface2)} .item.sel{background:var(--surface2);border-color:var(--line)}
+  .item .t{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .item .s{color:var(--text3);font-size:12px;font-family:var(--mono);margin-top:2px;display:flex;gap:10px;align-items:center}
+  .chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-family:var(--mono);border:1px solid var(--line);color:var(--text2)}
+  .chip.pass,.chip.high-ok{color:var(--mint);border-color:rgba(52,245,181,.35)}
+  .chip.concerns,.chip.medium{color:var(--amber);border-color:rgba(255,176,32,.35)}
+  .chip.fail,.chip.high,.chip.error{color:var(--red);border-color:rgba(255,77,94,.35)}
+  .chip.low{color:var(--text2)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{font-weight:500;color:var(--text3);text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:6px 10px}
+  td{padding:10px;border-top:1px solid var(--line);font-variant-numeric:tabular-nums} td.num,th.num{text-align:right}
+  tr.row{cursor:pointer} tr.row:hover td{background:var(--surface2)}
+  .mono{font-family:var(--mono);font-size:12px} .dim{color:var(--text3)} .t2{color:var(--text2)}
+  pre.diff{margin:0;padding:12px;background:#08080b;border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:420px;font:12px/1.55 var(--mono)}
+  pre.diff .a{color:var(--mint)} pre.diff .d{color:var(--red)} pre.diff .h{color:var(--sky)} pre.diff .m{color:var(--text3)}
+  .feed{max-height:210px;overflow:auto;font:12px/1.7 var(--mono)} .feed div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ty{display:inline-block;width:118px} .ty.PreToolUse{color:var(--sky)} .ty.PostToolUse{color:var(--mint)} .ty.UserPromptSubmit{color:var(--violet)}
+  .ty.Stop,.ty.ReviewProposal{color:var(--amber)} .ty.ReviewDone{color:var(--mint)}
+  .verdict{font-size:22px;font-weight:600;letter-spacing:-.02em}
+  .verdict.pass{color:var(--mint)} .verdict.concerns{color:var(--amber)} .verdict.fail,.verdict.error{color:var(--red)}
+  .finding{padding:10px 0;border-top:1px solid var(--line)} .finding:first-of-type{border-top:0}
+  button,.btn{font:inherit;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:999px;padding:5px 14px;cursor:pointer}
+  button:hover{border-color:rgba(255,255,255,.2)} button.on{background:var(--aurora);color:#04040a;border-color:transparent}
+  button:focus-visible,a:focus-visible,.item:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+  code.cmd{display:block;margin-top:8px;padding:10px 12px;background:#08080b;border:1px solid var(--line);border-radius:10px;font:12px var(--mono);color:var(--text2);overflow:auto}
+  .empty{color:var(--text3);padding:24px;text-align:center}
+  .warn{color:var(--amber);font-size:12px;margin-top:6px}
+  .row2{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .rank1 td:first-child{box-shadow:inset 3px 0 0 var(--mint)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><b>Warden</b></div>
+  <nav id="nav"><a href="#/sessions" data-k="sessions">Sessions</a><a href="#/arena" data-k="arena">Arena</a></nav>
+  <div class="spacer"></div>
+  <div class="meta" id="spend"></div>
+  <div class="meta"><span class="dot" id="live"></span><span id="livetxt">connecting</span></div>
+</header>
+<main id="app"></main>
+
+<script nonce="__NONCE__">
+"use strict";
+// All UI is built with createElement + textContent. Session text (prompts, diffs, tool output) is
+// untrusted, and it never goes through innerHTML.
+const $ = (s) => document.querySelector(s);
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === "class") e.className = v; else if (k === "on") for (const [ev, fn] of Object.entries(v)) e.addEventListener(ev, fn);
+    else if (v != null && v !== false) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat(Infinity)) if (k != null && k !== false) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return e;
+}
+const api = async (p, opt) => { const r = await fetch(p, opt); if (!r.ok) throw new Error(p + " " + r.status); return r.json(); };
+const ago = (ts) => { const s = Math.max(0, (Date.now() - ts) / 1000); return s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + "m ago" : s < 86400 ? Math.floor(s / 3600) + "h ago" : Math.floor(s / 86400) + "d ago"; };
+const usd = (u) => (u == null ? "?" : "$" + u.toFixed(3));
+const dur = (ms) => (ms == null ? "-" : ms >= 60000 ? (ms / 60000).toFixed(1) + "m" : (ms / 1000).toFixed(0) + "s");
+const tail = (p) => String(p || "").split(/[\\/]/).filter(Boolean).slice(-2).join("/");
+const chip = (text, cls) => h("span", { class: "chip " + (cls || "") }, text);
+const empty = (t) => h("div", { class: "empty" }, t);
+const cmd = (text) => h("code", { class: "cmd" }, text);
+
+// ---------- live feed ----------
+const live = []; let es, refreshTimer;
+function connect() {
+  es = new EventSource("/stream");
+  es.onopen = () => { $("#live").className = "dot live"; $("#livetxt").textContent = "live"; };
+  es.onerror = () => { $("#live").className = "dot"; $("#livetxt").textContent = "reconnecting"; };
+  es.onmessage = (m) => {
+    const e = JSON.parse(m.data); live.unshift(e); live.length = Math.min(live.length, 60);
+    renderFeed(); clearTimeout(refreshTimer); refreshTimer = setTimeout(softRefresh, 400);
+  };
+}
+function renderFeed() {
+  const box = $("#feed"); if (!box) return;
+  box.replaceChildren(...(live.length ? live.map((e) => h("div", {}, h("span", { class: "dim" }, new Date(e.ts).toLocaleTimeString() + " " + String(e.session_id).slice(0, 6) + " "),
+    h("span", { class: "ty " + e.type }, e.type), (e.tool_name ? e.tool_name + " " : "") + (e.summary || ""))) : [h("div", { class: "dim" }, "waiting for events…")]));
+}
+
+// ---------- routing ----------
+let route = { view: "sessions", id: null };
+function parse() { const [, v = "sessions", id] = location.hash.split("/"); route = { view: v === "arena" ? "arena" : "sessions", id: id ? decodeURIComponent(id) : null }; }
+async function render() {
+  parse();
+  document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("on", a.dataset.k === route.view));
+  try { await (route.view === "arena" ? viewArena() : viewSessions()); } catch (e) { $("#app").replaceChildren(empty("Cannot reach the Warden daemon: " + e.message)); }
+  api("/spend/today").then((s) => ($("#spend").textContent = "reviews today " + usd(s.usd))).catch(() => {});
+}
+async function softRefresh() { if (route.view === "sessions") { await refreshList(); if (route.id) await refreshDetail(); } }
+window.addEventListener("hashchange", render);
+
+// ---------- sessions ----------
+async function viewSessions() {
+  $("#app").replaceChildren(h("div", { class: "stack" },
+    h("div", { class: "card" }, h("h2", {}, "Live feed"), h("div", { class: "feed", id: "feed" })),
+    h("div", { class: "grid" }, h("div", { class: "card" }, h("h2", {}, "Sessions"), h("div", { id: "list" })), h("div", { id: "detail" }))));
+  renderFeed(); await refreshList(); await refreshDetail();
+}
+async function refreshList() {
+  const list = $("#list"); if (!list) return;
+  const rows = await api("/sessions");
+  list.replaceChildren(...(rows.length ? rows.map((s) => h("a", { class: "item" + (s.id === route.id ? " sel" : ""), href: "#/sessions/" + encodeURIComponent(s.id), tabindex: 0 },
+    h("div", { class: "t" }, h("span", { class: "dot " + (s.status === "running" ? "run" : "stop") }), s.first_prompt || "(no prompt)"),
+    h("div", { class: "s" }, s.id.slice(0, 8), s.event_count + " events", ago(s.last_event_at), s.review_verdict ? chip(s.review_verdict, s.review_verdict) : null),
+    h("div", { class: "s" }, tail(s.cwd)))) : [empty("No sessions yet. Run Claude Code in a project with the Warden hook.")]));
+}
+async function refreshDetail() {
+  const box = $("#detail"); if (!box) return;
+  if (!route.id) return box.replaceChildren(h("div", { class: "card" }, empty("Select a session")));
+  const id = route.id;
+  const [sessions, events, reviews, snap] = await Promise.all([api("/sessions"), api(`/sessions/${encodeURIComponent(id)}/events`), api(`/sessions/${encodeURIComponent(id)}/reviews`), api(`/sessions/${encodeURIComponent(id)}/snapshot`).catch(() => null)]);
+  if (id !== route.id) return;
+  const s = sessions.find((x) => x.id === id); if (!s) return box.replaceChildren(h("div", { class: "card" }, empty("Session not found")));
+  const final = [...events].reverse().find((e) => e.type === "Stop");
+  box.replaceChildren(h("div", { class: "stack" },
+    h("div", { class: "card" }, h("h3", {}, s.first_prompt || "(no prompt)"),
+      h("div", { class: "mono dim" }, `${s.id} · ${s.cwd || "?"} · ${s.status}`),
+      final?.summary ? h("p", { class: "t2" }, h("span", { class: "dim" }, "Agent's final message: "), final.summary) : null,
+      h("div", { class: "row2" }, h("span", { class: "dim" }, "Review this session (approval happens in your terminal, nothing is sent from this page):"))
+      , cmd(`node src/cli.mjs review ${s.id.slice(0, 8)}`)),
+    reviews.length ? reviews.map((r) => reviewCard(r)) : h("div", { class: "card" }, h("h2", {}, "Review"), empty("No review yet")),
+    h("div", { class: "card" }, h("h2", {}, "Changes at stop"), snap?.git_diff ? [h("div", { class: "mono dim" }, snap.git_status || ""), diffView(snap.git_diff)] : empty("No diff captured")),
+    h("div", { class: "card" }, h("h2", {}, `Timeline (${events.length})`), h("div", { class: "feed", style: "max-height:360px" }, events.map((e) => h("div", {}, h("span", { class: "dim" }, new Date(e.ts).toLocaleTimeString() + " "), h("span", { class: "ty " + e.type }, e.type), (e.tool_name ? e.tool_name + " " : "") + (e.summary || "") + (e.duration_ms != null ? `  ${e.duration_ms}ms` : "")))))));
+}
+function reviewCard(r) {
+  const rep = JSON.parse(r.report);
+  return h("div", { class: "card" }, h("h2", {}, "Review · " + new Date(r.ts).toLocaleString()),
+    h("div", { class: "row2" }, h("span", { class: "verdict " + rep.verdict }, String(rep.verdict).toUpperCase()), h("span", { class: "mono dim" }, "cost " + usd(rep.cost_usd) + (rep.cost_unknown_for?.length ? " + unpriced" : ""))),
+    h("div", { style: "margin:10px 0" }, (rep.roles || []).map((x) => h("div", { class: "mono" }, h("span", { class: "dim" }, x.ok ? "• " : "x "), x.role + " ", x.ok ? chip(x.verdict, x.verdict) : chip("error", "error"), x.summary ? h("span", { class: "dim" }, "  " + x.summary) : x.error ? h("span", { class: "dim" }, "  " + x.error) : null))),
+    (rep.findings || []).map((f) => h("div", { class: "finding" }, h("div", { class: "row2" }, chip(f.severity, f.severity), h("span", { class: "mono" }, (f.file || "") + (f.line ? ":" + f.line : "")), h("span", { class: "mono dim" }, (f.roles || []).join(", "))), h("div", { class: "t2" }, f.message))),
+    (rep.findings || []).length ? null : h("div", { class: "dim" }, "No findings"));
+}
+function diffView(text) {
+  const lines = String(text).split("\n"); const cut = lines.length > 3000;
+  return h("pre", { class: "diff" }, (cut ? lines.slice(0, 3000) : lines).map((l) => h("span", { class: l.startsWith("+++") || l.startsWith("---") || l.startsWith("diff ") || l.startsWith("index ") ? "m" : l[0] === "+" ? "a" : l[0] === "-" ? "d" : l.startsWith("@@") ? "h" : "" }, l + "\n")), cut ? "\n[truncated: first 3000 lines shown]" : null);
+}
+
+// ---------- arena ----------
+const rankKey = (r) => [r.ok ? 1 : 0, r.checks_passed ? 1 : 0, r.judge_avg ?? -1, -(r.cost_usd ?? Infinity), -(r.duration_ms ?? Infinity)];
+const rankSort = (rows) => rows.slice().sort((a, b) => { const x = rankKey(a), y = rankKey(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return y[i] - x[i]; return 0; });
+const pct = (x) => (x == null ? "-" : Math.round(x * 100) + "%");
+
+async function viewArena() {
+  if (route.id) return viewArenaRun(route.id);
+  const [board, runs] = await Promise.all([api("/arena/board"), api("/arena/runs")]);
+  $("#app").replaceChildren(h("div", { class: "stack" },
+    h("div", { class: "card" }, h("h2", {}, "Leaderboard"), board.length ? [h("table", {}, h("thead", {}, h("tr", {}, ["Subject", "Runs", "Wins", "Checks pass", "Judge", "Avg cost", "Avg time", "You"].map((c, i) => h("th", { class: i ? "num" : "" }, c)))),
+      h("tbody", {}, board.map((r, i) => h("tr", { class: i === 0 ? "rank1" : "" }, h("td", {}, r.subject, r.model ? h("span", { class: "dim mono" }, "  " + r.model) : null), h("td", { class: "num" }, r.runs), h("td", { class: "num" }, pct(r.winRate)), h("td", { class: "num" }, pct(r.passRate)), h("td", { class: "num" }, r.judgeAvg == null ? "-" : r.judgeAvg.toFixed(1)), h("td", { class: "num" }, usd(r.costAvg)), h("td", { class: "num" }, dur(r.msAvg)), h("td", { class: "num" }, (r.human > 0 ? "+" : "") + r.human))))),
+      board[0].runs < 5 ? h("div", { class: "warn" }, "Few runs so far: treat rankings as anecdotes, not evidence.") : null] : empty("No arena runs yet. Try: node src/cli.mjs arena run examples/fix-slugify.json")),
+    h("div", { class: "card" }, h("h2", {}, "Runs"), runs.length ? runs.map((r) => h("a", { class: "item", href: "#/arena/" + encodeURIComponent(r.id), tabindex: 0 }, h("div", { class: "t" }, r.prompt), h("div", { class: "s" }, r.task_id, r.subjects + " subjects", ago(r.ts), r.id))) : empty("None"))));
+}
+async function viewArenaRun(id) {
+  const { run, results } = await api("/arena/runs/" + encodeURIComponent(id));
+  const ranked = rankSort(results);
+  const open = new Set();
+  const body = h("tbody");
+  const draw = () => body.replaceChildren(...ranked.flatMap((r, i) => {
+    const status = !r.ok ? chip("error", "error") : chip(r.checks_passed ? "pass" : "fail", r.checks_passed ? "pass" : "fail");
+    const main = h("tr", { class: "row" + (i === 0 ? " rank1" : ""), tabindex: 0, on: { click: () => { open.has(r.subject) ? open.delete(r.subject) : open.add(r.subject); draw(); } } },
+      h("td", {}, i + 1), h("td", {}, r.subject, r.model ? h("span", { class: "dim mono" }, "  " + r.model) : null), h("td", {}, status), h("td", { class: "num" }, r.judge_avg == null ? "-" : r.judge_avg.toFixed(1)), h("td", { class: "num" }, usd(r.cost_usd)),
+      h("td", { class: "num" }, dur(r.duration_ms)), h("td", { class: "num" }, r.tokens ?? "-"), h("td", { class: "num" }, r.turns ?? "-"), h("td", { class: "num mono" }, `${r.files_changed ?? "-"} +${r.lines_added ?? 0}/-${r.lines_removed ?? 0}`),
+      h("td", { class: "num" }, (r.human > 0 ? "+" : "") + (r.human ?? 0)));
+    if (!open.has(r.subject)) return [main];
+    const rate = (v) => h("button", { class: r.human === v ? "on" : "", on: { click: async (ev) => { ev.stopPropagation(); const nv = r.human === v ? 0 : v; await api("/arena/rate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ run_id: run.id, subject: r.subject, value: nv }) }); r.human = nv === 0 ? null : nv; draw(); } } }, v > 0 ? "Good" : "Bad");
+    const detail = h("tr", {}, h("td", { colspan: 10 }, h("div", { class: "stack" },
+      h("div", { class: "row2" }, h("span", { class: "dim" }, "Your rating:"), rate(1), rate(-1)),
+      r.error ? h("div", { class: "warn" }, r.error) : null,
+      r.checks.length ? h("div", { class: "mono" }, r.checks.map((c) => h("span", { style: "margin-right:14px" }, c.name + " ", chip(c.pass ? "pass" : "fail", c.pass ? "pass" : "fail")))) : null,
+      r.judge_detail.length ? h("div", {}, h("div", { class: "dim", style: "margin-bottom:4px" }, "Blind judge notes"), r.judge_detail.map((j) => h("div", { class: "t2" }, h("span", { class: "mono dim" }, `${j.judge} #${j.order + 1} → `), j.error ? "error: " + j.error : `${j.score}/10 ${j.note || ""}`))) : null,
+      r.diff ? diffView(r.diff) : h("div", { class: "dim" }, "No changes made"))));
+    return [main, detail];
+  }));
+  draw();
+  $("#app").replaceChildren(h("div", { class: "stack" },
+    h("a", { href: "#/arena", class: "dim" }, "← Arena"),
+    h("div", { class: "card" }, h("h3", {}, run.prompt), h("div", { class: "mono dim" }, `${run.task_id} · ${run.id} · ${new Date(run.ts).toLocaleString()}`),
+      h("div", { class: "mono dim", style: "margin-top:6px" }, "Judges: " + ((run.judges.used || []).map((j) => `${j.provider}:${j.model ?? "default"}`).join(", ") || "none")),
+      (run.judges.warnings || []).map((w) => h("div", { class: "warn" }, w))),
+    h("div", { class: "card" }, h("h2", {}, "Results · click a row for diff and judge notes"), h("table", {}, h("thead", {}, h("tr", {}, ["#", "Subject", "Checks", "Judge", "Cost", "Time", "Tokens", "Turns", "Files +/-", "You"].map((c, i) => h("th", { class: i > 2 ? "num" : "" }, c)))), body))));
+}
+
+connect(); render();
+setInterval(() => { if (route.view === "sessions") refreshList().catch(() => {}); }, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    env:
+      WARDEN_NO_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: git identity (tests create throwaway repos)
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "warden ci"
+      - name: npm test
+        run: npm test
+        env:
+          WARDEN_HOME: ${{ runner.temp }}/warden-home
+
+  # Installs Warden on a clean machine the way a new user would (from a packed tarball instead of npm,
+  # since this runs before publishing), then checks that the installed command works.
+  install:
+    name: installer (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      WARDEN_NO_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: pack
+        shell: bash
+        run: npm pack --pack-destination "$RUNNER_TEMP" && ls "$RUNNER_TEMP"/agent-warden-*.tgz
+      - name: install.sh
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export WARDEN_PACKAGE="$(ls "$RUNNER_TEMP"/agent-warden-*.tgz)"
+          export npm_config_prefix="$RUNNER_TEMP/prefix"
+          sh ./install.sh
+          "$RUNNER_TEMP/prefix/bin/warden" --version
+          WARDEN_HOME="$RUNNER_TEMP/home" "$RUNNER_TEMP/prefix/bin/warden" doctor || true
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:WARDEN_PACKAGE = (Get-ChildItem "$env:RUNNER_TEMP\agent-warden-*.tgz").FullName
+          $env:npm_config_prefix = "$env:RUNNER_TEMP\prefix"
+          .\install.ps1
+          & "$env:RUNNER_TEMP\prefix\warden.cmd" --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }

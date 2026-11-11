@@ -1,0 +1,11 @@
+node_modules/
+.testdata/
+*.db
+*.db-wal
+*.db-shm
+events.jsonl
+daemon.out
+.env
+.env.*
+dist/
+*.tgz

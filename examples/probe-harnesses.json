@@ -1,0 +1,11 @@
+{
+  "id": "probe-harnesses",
+  "prompt": "slugify() in slug.mjs is incomplete: `node test.mjs` fails. Fix slugify so every assertion in test.mjs passes. Do not edit test.mjs and do not change anything else.",
+  "repo": "../../warden-spike/arena-demo",
+  "checks": [{ "name": "tests", "cmd": "node test.mjs" }],
+  "timeoutMs": 300000,
+  "subjects": [
+    { "name": "opencode-4.1-mini", "kind": "opencode", "model": "openai/gpt-4.1-mini" },
+    { "name": "pi-4.1-mini",       "kind": "pi",       "model": "openai/gpt-4.1-mini" }
+  ]
+}
