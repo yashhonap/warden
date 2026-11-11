@@ -27,9 +27,17 @@ export async function setupWorktree(task, runId, subject) {
   return dir;
 }
 
+// On Windows a just-finished process can keep files locked for a moment, so `git worktree remove` may fail.
+// Retry, then delete the folder ourselves and let git forget the worktree, so none are left behind.
 export async function removeWorktree(task, dir) {
-  await git(task.repo, ["worktree", "remove", "--force", dir]);
-  try { fs.rmSync(path.dirname(dir), { recursive: true, force: true }); } catch {}
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const r = await git(task.repo, ["worktree", "remove", "--force", dir]);
+    if (r.code === 0 && !fs.existsSync(dir)) break;
+    await new Promise((res) => setTimeout(res, 300 * (attempt + 1)));
+  }
+  if (fs.existsSync(dir)) { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {} }
+  await git(task.repo, ["worktree", "prune"]);
+  try { fs.rmSync(path.dirname(dir), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch {}
 }
 
 async function runChecks(task, cwd) {
