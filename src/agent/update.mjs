@@ -1,4 +1,4 @@
-// Update notice: at most once a day Warden asks the npm registry for the latest version number of agent-warden.
+// Update notice: at most once a day Warden asks the npm registry for the latest version number of warden-agent.
 // Nothing about you or your code is sent; it is a plain GET of a public URL. Turn it off with
 // WARDEN_NO_UPDATE_CHECK=1 or "updateCheck": false under "agent" in ~/.warden/config.json.
 import fs from "node:fs";

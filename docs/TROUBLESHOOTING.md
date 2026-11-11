@@ -51,7 +51,7 @@ Node.js uses the `HTTPS_PROXY` environment variable. Set it to your proxy addres
 
 ## Windows says the downloaded warden.exe is from an unknown publisher
 
-The standalone file is not code-signed. Choose "More info", then "Run anyway", or install with `npm i -g agent-warden` instead.
+The standalone file is not code-signed. Choose "More info", then "Run anyway", or install with `npm i -g warden-agent` instead.
 
 ## Still stuck
 

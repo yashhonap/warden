@@ -2,7 +2,7 @@
 # Warden installer for macOS and Linux.
 #   curl -fsSL https://raw.githubusercontent.com/yashhonap/warden/main/install.sh | sh
 # What it does, and nothing else: checks for Node.js 22.13+ (and tells you how to get it if missing),
-# then installs Warden from npm (package "agent-warden"). It never uses sudo by itself.
+# then installs Warden from npm (package "warden-agent"). It never uses sudo by itself.
 # Set WARDEN_PACKAGE to install from somewhere else (e.g. a local .tgz) for testing.
 set -e
 
@@ -24,7 +24,7 @@ if ! command -v node >/dev/null 2>&1 || ! node -e 'const [a,b]=process.versions.
 fi
 say "Node.js $(node --version) found."
 
-PKG="${WARDEN_PACKAGE:-agent-warden}"
+PKG="${WARDEN_PACKAGE:-warden-agent}"
 say "Installing $PKG from npm..."
 if ! npm install -g "$PKG"; then
   echo

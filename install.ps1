@@ -2,7 +2,7 @@
 #   irm https://raw.githubusercontent.com/yashhonap/warden/main/install.ps1 | iex
 # What it does, and nothing else:
 #   1. If Node.js 22.13+ is missing, installs Node.js LTS with winget (the official OpenJS.NodeJS.LTS package).
-#   2. Installs Warden from npm (package "agent-warden").
+#   2. Installs Warden from npm (package "warden-agent").
 # Set WARDEN_PACKAGE to install from somewhere else (e.g. a local .tgz) for testing.
 
 $ErrorActionPreference = 'Stop'
@@ -36,7 +36,7 @@ if (-not (NodeOk)) {
 }
 Say ("Node.js " + (& node --version) + " found.")
 
-$pkg = if ($env:WARDEN_PACKAGE) { $env:WARDEN_PACKAGE } else { 'agent-warden' }
+$pkg = if ($env:WARDEN_PACKAGE) { $env:WARDEN_PACKAGE } else { 'warden-agent' }
 Say "Installing $pkg from npm..."
 & npm.cmd install -g $pkg
 if ($LASTEXITCODE -ne 0) {

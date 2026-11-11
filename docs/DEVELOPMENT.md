@@ -124,8 +124,8 @@ Subjects that error are no longer judged (no judge spend) and show `-` instead o
 `site/Warden Landing Page.html` is the landing page exported from your Claude Design project, unmodified.
 Preview it locally: `node site/serve.mjs` then open http://127.0.0.1:4173/ (a separate server from the Warden daemon, which holds your code).
 The page loads React 18.3.1 from unpkg and fonts from Google Fonts, so it needs internet. To publish, upload the HTML file as `index.html` to any static host.
-Edits made to your design export (the unmodified original is in `site-original/`): the install box and its copy button now say `npm i -g agent-warden` (`warden` on npm belongs to someone else), every GitHub/Docs/footer link points at https://github.com/yashhonap/warden (Docs goes to its README), and footer links with no real destination (Roadmap, Contributing, Security, License, Discord, X, RSS) were removed.
-Still true before you launch: that repo must exist, `agent-warden` must be published to npm, and the footer still says "Open source under MIT" while the project has no LICENSE file yet.
+Edits made to your design export (the unmodified original is in `site-original/`): the install box and its copy button now say `npm i -g warden-agent` (`warden` on npm belongs to someone else), every GitHub/Docs/footer link points at https://github.com/yashhonap/warden (Docs goes to its README), and footer links with no real destination (Roadmap, Contributing, Security, License, Discord, X, RSS) were removed.
+Still true before you launch: that repo must exist, `warden-agent` must be published to npm, and the footer still says "Open source under MIT" while the project has no LICENSE file yet.
 
 ## Phase 8: Warden becomes a terminal coding agent (0.2.0)
 

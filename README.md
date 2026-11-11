@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/yashhonap/warden/main/install.sh | 
 
 **Already have Node.js 22.13+:**
 ```bash
-npm i -g agent-warden
+npm i -g warden-agent
 ```
 
 **Or download one file** (Node.js included): `warden-windows-x64.exe`, `warden-macos-arm64` or `warden-linux-x64` from [Releases](https://github.com/yashhonap/warden/releases/latest). Windows may warn that the publisher is unknown (the file is not code-signed); choose "More info", then "Run anyway".

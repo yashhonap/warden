@@ -1,5 +1,5 @@
 {
-  "name": "agent-warden",
+  "name": "warden-agent",
   "version": "0.4.0",
   "description": "A terminal coding agent for any model (Gemini, OpenRouter, Groq, Ollama, OpenAI, Anthropic), plus tools to review and compare coding agents.",
   "keywords": [
