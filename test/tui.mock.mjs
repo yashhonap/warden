@@ -101,7 +101,8 @@ const footerReq = requests.find((b) => lastUser(b) === "also add a footer");
 const order = footerReq.messages.map((x) => x.role);
 assert.deepEqual(order.slice(-3), ["assistant", "tool", "user"], "queued message comes right after the tool result");
 // what you type while it works is not drawn into the model's output (only the "queued" note shows it)
-const typedEchoes = plain().slice(m).split("also add a footer").length - 1;
+// (the status line may also show it as the draft being typed, "✎ also add a footer", depending on timing: that is intended)
+const typedEchoes = plain().slice(m).replace(/✎ also add a footer/g, "").split("also add a footer").length - 1;
 assert.equal(typedEchoes, 2, "typed text appears only in the queued note and the sent line");
 
 // 3. esc interrupts a reply mid-stream; the next message works normally
