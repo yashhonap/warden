@@ -93,16 +93,38 @@ export function toolBody(c, display, { error, denied } = {}) {
 
 // ---- spinner -----------------------------------------------------------------
 
+// One status line, redrawn in place. label may be a function (re-evaluated on every frame); extra() adds text after it
+// (e.g. what you are typing). The line is cut to the terminal width: a wrapped line could not be redrawn in place.
 export class Spinner {
-  constructor(out = process.stdout, c = C) { this.out = out; this.c = c; this.timer = null; this.frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]; }
+  constructor(out = process.stdout, c = C, { hint = "", extra = null } = {}) {
+    this.out = out; this.c = c; this.timer = null; this.hint = hint; this.extra = extra; this.i = 0;
+    this.frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  }
+  get running() { return !!this.timer; }
+  elapsed() { return this.t0 ? Date.now() - this.t0 : 0; }
   start(label = "Thinking") {
+    this.label = label;
     if (!this.out.isTTY || this.timer) return;
-    this.t0 = Date.now(); this.label = label; let i = 0;
-    const draw = () => { const s = Math.floor((Date.now() - this.t0) / 1000); this.out.write(`\r\x1b[2K  ${this.c.accent(this.frames[i++ % this.frames.length])} ${this.c.dim(`${this.label}… ${s}s · ctrl+c to interrupt`)}`); };
-    draw(); this.timer = setInterval(draw, 90);
+    this.t0 = Date.now();
+    this.draw(); this.timer = setInterval(() => this.draw(), 90);
+  }
+  draw() {
+    const s = Math.floor(this.elapsed() / 1000);
+    const label = typeof this.label === "function" ? this.label() : this.label;
+    let body = `${label}… ${s}s${this.hint ? " · " + this.hint : ""}${this.extra?.() || ""}`.replace(/[\r\n\t]+/g, " ");
+    const room = Math.max(20, (this.out.columns || 80) - 6);
+    if (body.length > room) body = body.slice(0, room - 1) + "…";
+    this.out.write(`\r\x1b[2K  ${this.c.accent(this.frames[this.i++ % this.frames.length])} ${this.c.dim(body)}`);
   }
   setLabel(l) { this.label = l; }
+  // print a full line above the spinner without breaking it
+  print(line) {
+    if (!this.timer) { this.out.write(line + "\n"); return; }
+    this.out.write("\r\x1b[2K" + line + "\n"); this.draw();
+  }
   stop() { if (!this.timer) return; clearInterval(this.timer); this.timer = null; this.out.write("\r\x1b[2K"); }
 }
+
+export const stripAnsi = (s) => String(s).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
 
 export const fmtTokens = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));

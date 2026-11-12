@@ -13,6 +13,9 @@ export const AGENT_DEFAULTS = {
   maxOutputTokens: 8192,
   maxSteps: 60,              // model calls per user message before Warden stops and asks you
   contextTokens: 120000,     // rough budget; old tool output is trimmed above this
+  requestTimeoutSec: 180,    // a model that has not started answering after this long is given up on (retried once)
+  idleTimeoutSec: 120,       // a reply that goes completely silent this long is stopped
+  stallTimeoutSec: 300,      // a connection kept open with no reply at all (only keep-alive pings) this long is stopped
   providers: {},             // extra or overridden providers: { "name": { "api": "openai", "baseUrl": "...", "keyEnv": ["ENV"] } }
   recentModels: [],
 };

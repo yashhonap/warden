@@ -53,6 +53,15 @@ Node.js uses the `HTTPS_PROXY` environment variable. Set it to your proxy addres
 
 The standalone file is not code-signed. Choose "More info", then "Run anyway", or install with `npm i -g warden-agent` instead.
 
+## Warden looks stuck / does not answer
+
+- **A spinner is showing:** the status line says what is happening (thinking, writing a file, running a command, waiting for the model). Press **esc** to stop it; your conversation is kept. A model that stops responding is given up on automatically (after 2 to 5 minutes; change `requestTimeoutSec`, `idleTimeoutSec`, `stallTimeoutSec` under `agent` in `~/.warden/config.json`).
+- **Nothing at all is showing:** press **esc** or **ctrl+c** once. If it still does not stop, press ctrl+c again within two seconds to quit; then `warden --continue` picks the conversation up again.
+- **"The model sent an empty reply":** free models sometimes return nothing, especially reasoning models under load. Send the message again, or switch with `/model`.
+- **Servers the model started** keep running in the background: `/jobs` lists them, `/jobs stop all` stops them. They also stop when you quit Warden.
+
+You do not have to wait for the model to finish: type your next message and press enter. It is queued and the model reads it at its next step.
+
 ## Still stuck
 
 Open an issue at https://github.com/yashhonap/warden/issues and paste the output of `warden doctor`.

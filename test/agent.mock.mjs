@@ -10,10 +10,11 @@ import { spawn } from "node:child_process";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "warden-agent-test-"));
 process.env.WARDEN_HOME = path.join(tmp, "home");
-const { runTurn, trimContext } = await import("../src/agent/loop.mjs");
+const { runTurn, trimContext, compactWrites } = await import("../src/agent/loop.mjs");
 const { Session } = await import("../src/agent/session.mjs");
 const { toAnthropic, chat } = await import("../src/agent/providers.mjs");
-const { TOOLS, toolByName, needsApproval, globToRegex } = await import("../src/agent/tools.mjs");
+const { TOOLS, toolByName, needsApproval, globToRegex, listJobs, stopAllJobs } = await import("../src/agent/tools.mjs");
+const { parseTextToolCalls } = await import("../src/agent/texttools.mjs");
 
 // ---------- mock model server ----------
 const requests = [];
@@ -23,10 +24,12 @@ const server = http.createServer((req, res) => {
     const body = JSON.parse(b || "{}");
     requests.push({ url: req.url, auth: req.headers.authorization, body });
     const out = script(body, requests.length);
+    if (out.hang) return; // never answer at all
     if (out.status) { res.writeHead(out.status, out.headers || {}); return res.end(out.body || ""); }
     res.writeHead(200, { "content-type": "text/event-stream" });
     for (const ch of out) {
       if (ch.delay) { await new Promise((r) => setTimeout(r, ch.delay)); if (res.destroyed) return; continue; }
+      if (ch.comment) { if (!res.destroyed) res.write(": OPENROUTER PROCESSING\n\n"); continue; } // keep-alive ping
       res.write(`data: ${JSON.stringify(ch)}\n\n`);
     }
     res.write("data: [DONE]\n\n"); res.end();
@@ -193,6 +196,135 @@ const head = await new Promise((resolve) => {
 });
 assert.equal(head.code, 0); assert.match(head.e, /denied/); assert.match(head.o, /Could not edit/);
 assert.equal(fs.readFileSync(path.join(proj, "calc.py"), "utf8"), "def add(a, b):\n    return a - b\n");
+
+// ---------- 0.4.1: never stuck, keep chatting ----------
+const P2 = { mode: "yolo", allowed: new Set() };
+const notices = [];
+const ui2 = () => ({ ...makeUi(), onNotice: (m) => notices.push(m), onReasoning: (d) => uiLog.push(["reasoning", d]) });
+const fast = { ...cfg, requestTimeoutSec: 0.5, idleTimeoutSec: 0.4, stallTimeoutSec: 0.8 };
+
+// 13. no answer at all: retried once, then a clear timeout error (not "interrupted"); the conversation stays usable
+requests.length = 0;
+script = () => ({ hang: true });
+s = new Session({ cwd: proj, model: "mock/test-model" });
+uiLog.length = 0;
+let t0 = Date.now();
+await assert.rejects(runTurn({ session: s, userText: "anyone?", cfg: fast, ui: ui2(), perm: P2 }), (e) => e.timeout === true && /did not respond within 0\.5s \(tried twice\)/.test(e.message));
+assert.equal(requests.length, 2, "one automatic retry");
+assert.ok(Date.now() - t0 < 3000);
+script = () => text("back");
+r = await runTurn({ session: s, userText: "hello again", cfg: fast, ui: ui2(), perm: P2 });
+assert.equal(r.text, "back", "the next message works after a timeout");
+
+// 14. the stream goes silent mid-reply: idle timeout; what arrived is kept as context
+script = (body, n) => [...text("Half an ans"), { delay: 2000 }, ...text("wer")];
+s = new Session({ cwd: proj, model: "mock/test-model" });
+await assert.rejects(runTurn({ session: s, userText: "go", cfg: fast, ui: ui2(), perm: P2 }), /stopped sending anything for 0\.4s/);
+assert.match(s.messages.at(-1).content, /^Half an ans[\s\S]*reply cut off/);
+
+// 15. only keep-alive pings, no reply: stall timeout (pings alone do not count as progress)
+script = () => Array.from({ length: 12 }, () => [{ comment: true }, { delay: 150 }]).flat();
+s = new Session({ cwd: proj, model: "mock/test-model" });
+t0 = Date.now();
+await assert.rejects(runTurn({ session: s, userText: "go", cfg: fast, ui: ui2(), perm: P2 }), /without sending any reply/);
+assert.ok(Date.now() - t0 < 1500);
+
+// 16. reasoning streams separately: shown as activity, not part of the reply
+uiLog.length = 0;
+script = () => [{ choices: [{ delta: { reasoning_content: "Let me think" } }] }, { choices: [{ delta: { reasoning: " more" } }] }, ...text("Answer.")];
+s = new Session({ cwd: proj, model: "mock/test-model" });
+r = await runTurn({ session: s, userText: "q", cfg, ui: ui2(), perm: P2 });
+assert.equal(r.text, "Answer.");
+assert.deepEqual(uiLog.filter((e) => e[0] === "reasoning").map((e) => e[1]), ["Let me think", " more"]);
+
+// 17. empty reply: a notice instead of silence
+notices.length = 0;
+script = () => [{ choices: [{ delta: {}, finish_reason: "stop" }] }];
+r = await runTurn({ session: s, userText: "q2", cfg, ui: ui2(), perm: P2 });
+assert.equal(r.empty, true); assert.match(notices.join(" "), /empty reply \(finish reason: stop\)/);
+
+// 18. a huge write_file cut off by the output limit: the model is told to write in parts, then does
+notices.length = 0;
+fs.rmSync(path.join(proj, "big.html"), { force: true });
+script = (body) => {
+  const tools = body.messages.filter((m) => m.role === "tool");
+  if (!tools.length) return [{ choices: [{ delta: { tool_calls: [{ index: 0, id: "b1", function: { name: "write_file", arguments: '{"path":"big.html","content":"<html><body>lots of' } }] } }] }, { choices: [{ delta: {}, finish_reason: "length" }] }];
+  if (tools.length === 1) { assert.match(tools[0].content, /output limit.*append=true/s); return toolCall("b2", "write_file", { path: "big.html", content: "<html>\n" }); }
+  if (tools.length === 2) return toolCall("b3", "write_file", { path: "big.html", content: "</html>\n", append: true });
+  return text("Wrote it in two parts.");
+};
+s = new Session({ cwd: proj, model: "mock/test-model" });
+r = await runTurn({ session: s, userText: "big page", cfg, ui: ui2(), perm: P2 });
+assert.equal(r.text, "Wrote it in two parts.");
+assert.equal(fs.readFileSync(path.join(proj, "big.html"), "utf8"), "<html>\n</html>\n");
+
+// 19. text tool format: a cut-off <tool_call> is reported, not silently dropped
+const cut = parseTextToolCalls('Writing it now.\n<tool_call>\n{"name": "write_file", "arguments": {"path": "a.html", "content": "<p>');
+assert.equal(cut.text, "Writing it now."); assert.equal(cut.toolCalls.length, 1);
+assert.equal(cut.toolCalls[0].name, "write_file"); assert.equal(cut.toolCalls[0].args.__truncated, true);
+
+// 20. old file contents are compacted out of the history; the latest step is untouched
+const bigContent = "x\n".repeat(2000);
+const hist = [
+  { role: "user", content: "make it" },
+  { role: "assistant", content: "", toolCalls: [{ id: "1", name: "write_file", args: { path: "index.html", content: bigContent } }] },
+  { role: "tool", toolCallId: "1", content: "Created index.html" },
+  { role: "assistant", content: "", toolCalls: [{ id: "2", name: "write_file", args: { path: "b.html", content: bigContent } }] },
+];
+assert.equal(compactWrites(hist), 1);
+assert.match(hist[1].toolCalls[0].args.content, /^\[2001 lines written earlier.*Read index\.html/);
+assert.equal(hist[3].toolCalls[0].args.content, bigContent, "the newest call keeps its content");
+assert.equal(compactWrites(hist), 0, "compacting twice changes nothing");
+
+// 21. messages typed while the model works are handed over between steps (and a finished turn continues with them)
+let queue = ["also make it blue"];
+script = (body) => {
+  const last = body.messages.at(-1);
+  if (toolCount(body) === 0) return toolCall("q1", "list_dir", {});
+  if (last.role === "user" && last.content === "also make it blue") return text("Listed, and noted: blue.");
+  return text("unexpected");
+};
+s = new Session({ cwd: proj, model: "mock/test-model" });
+const delivered = [];
+r = await runTurn({ session: s, userText: "look around", cfg, ui: { ...ui2(), takeQueued: () => queue.shift() || null, onQueuedDelivered: (t) => delivered.push(t) }, perm: P2 });
+assert.equal(r.text, "Listed, and noted: blue."); assert.deepEqual(delivered, ["also make it blue"]);
+assert.deepEqual(s.messages.slice(-4).map((m) => m.role), ["assistant", "tool", "user", "assistant"]);
+queue = ["one more thing"];
+script = (body) => (body.messages.at(-1).content === "one more thing" ? text("Handled the extra request.") : text("First answer."));
+r = await runTurn({ session: s, userText: "simple question", cfg, ui: { ...ui2(), takeQueued: () => queue.shift() || null }, perm: P2 });
+assert.equal(r.text, "Handled the extra request.", "a message typed during a plain answer is not dropped");
+// Anthropic: a user message after tool results merges into the same user turn
+const merged = toAnthropic([{ role: "user", content: "a" }, { role: "assistant", content: "", toolCalls: [{ id: "x", name: "list_dir", args: {} }] }, { role: "tool", toolCallId: "x", content: "r" }, { role: "user", content: "b" }]);
+assert.equal(merged.length, 3); assert.deepEqual(merged[2].content.map((b) => b.type), ["tool_result", "text"]);
+
+// 22. edit_file: trailing spaces forgiven; wrong indentation explained with the real text
+fs.writeFileSync(path.join(proj, "ws.py"), "def f():   \n    return 1  \n");
+toolByName("edit_file").run({ path: "ws.py", old_string: "def f():\n    return 1", new_string: "def f():\n    return 2" }, ctx);
+assert.equal(fs.readFileSync(path.join(proj, "ws.py"), "utf8"), "def f():\n    return 2\n");
+assert.throws(() => toolByName("edit_file").run({ path: "ws.py", old_string: "def f():\nreturn 2", new_string: "x" }, ctx), /different indentation are at line 1[\s\S]*2\t    return 2/);
+assert.throws(() => toolByName("edit_file").run({ path: "ws.py", old_string: "def f():\n    return 99", new_string: "x" }, ctx), /first line matches line 1/);
+
+// 23. write_file append
+fs.writeFileSync(path.join(proj, "parts.txt"), "one\n");
+const ap = toolByName("write_file").run({ path: "parts.txt", content: "two\n", append: true }, ctx);
+assert.equal(fs.readFileSync(path.join(proj, "parts.txt"), "utf8"), "one\ntwo\n"); assert.match(ap.content, /Appended 2 lines.*now 3 lines/);
+
+// 24. bash never hangs: a command that leaves a child running still returns at its timeout
+const node = JSON.stringify(process.execPath);
+const grand = `${node} -e "require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{stdio:'inherit'}); setTimeout(()=>{},30000)"`;
+t0 = Date.now();
+const hb = await toolByName("bash").run({ command: grand, timeout_ms: 1500 }, ctx);
+assert.ok(Date.now() - t0 < 8000, `bash returned after ${Date.now() - t0}ms`); assert.match(hb.content, /timed out after 2s|timed out after 1\.5s|timed out/); assert.match(hb.content, /background=true/);
+
+// 25. background jobs: start a server, read its output, stop it
+const srv = await toolByName("bash").run({ command: `${node} -e "require('http').createServer((q,s)=>s.end('ok')).listen(0,function(){console.log('listening on '+this.address().port)})"`, background: true }, ctx);
+assert.match(srv.content, /Started in the background as job \d+/); assert.match(srv.content, /listening on \d+/);
+const jid = listJobs().at(-1).id;
+assert.match(toolByName("job").run({ id: jid }, ctx).content, /running for/);
+assert.match(toolByName("job").run({ id: jid, stop: true }, ctx).content, /Stopped job/);
+await new Promise((r2) => setTimeout(r2, 500));
+assert.match(toolByName("job").run({}, ctx).content, /exited \(stopped\)/);
+stopAllJobs();
 
 server.close();
 console.log("agent.mock: all assertions passed");

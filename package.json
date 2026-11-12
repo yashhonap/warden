@@ -1,6 +1,6 @@
 {
   "name": "warden-agent",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A terminal coding agent for any model (Gemini, OpenRouter, Groq, Ollama, OpenAI, Anthropic), plus tools to review and compare coding agents.",
   "keywords": [
     "ai",
@@ -36,7 +36,7 @@
   "scripts": {
     "daemon": "node src/cli.mjs daemon",
     "watch": "node src/cli.mjs watch",
-    "test": "node test/meta.mock.mjs && node test/agent.mock.mjs && node test/models.mock.mjs && node test/providers.mock.mjs && node test/arena.mock.mjs && node test/harnesses.mock.mjs",
+    "test": "node test/meta.mock.mjs && node test/agent.mock.mjs && node test/tui.mock.mjs && node test/models.mock.mjs && node test/providers.mock.mjs && node test/arena.mock.mjs && node test/harnesses.mock.mjs",
     "build:standalone": "node scripts/build-standalone.mjs"
   },
   "engines": {

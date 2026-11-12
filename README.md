@@ -6,7 +6,7 @@ You chat with it in your project folder. It reads your code, edits files, runs c
 
 It also includes the original Warden supervisor tools: record and review Claude Code sessions, and run the same task on several models to compare them.
 
-> **Status: early (0.4.0).** Tested live with Gemini 2.5 Flash. Read [What is verified](#what-is-verified).
+> **Status: early (0.4.1).** Tested live with Gemini 2.5 Flash. Read [What is verified](#what-is-verified).
 
 ## Install
 
@@ -75,6 +75,8 @@ Then type what you want, e.g. `the tests in calc_test.py fail, fix them`. Warden
   ? Allow this change? [y] yes  [a] always allow edit_file this session  [n] no, or type what to do instead
 ```
 
+**You can keep typing while it works.** Press Enter and the message is queued: the model reads it at its next step (after the tool it is running), so you can add details or change course without waiting. What you type shows in the status line.
+
 Inside the app:
 
 | | |
@@ -89,8 +91,9 @@ Inside the app:
 | `/resume` | continue an earlier conversation |
 | `/init` | the model writes a `WARDEN.md` with notes about your project |
 | `/usage` | tokens used |
+| `/jobs` | servers and watchers the model started in the background; `/jobs stop <id>` or `/jobs stop all` |
 | `!command` | run a shell command yourself; the model sees the output |
-| Ctrl+C | interrupt the model; twice at an empty prompt quits |
+| Esc or Ctrl+C | interrupt the model (the conversation is kept); Ctrl+C twice at an empty prompt quits |
 
 Other ways to start:
 
@@ -105,7 +108,9 @@ If a `WARDEN.md`, `AGENTS.md` or `CLAUDE.md` exists in the folder, its contents 
 
 ## Tools the model can use
 
-`read_file`, `write_file`, `edit_file` (exact text replacement), `list_dir`, `glob`, `grep`, and `bash`. On Windows, `bash` uses Git Bash if installed, otherwise PowerShell.
+`read_file`, `write_file` (with `append` for writing big files in parts), `edit_file` (exact text replacement), `list_dir`, `glob`, `grep`, `bash`, and `job`. On Windows, `bash` uses Git Bash if installed, otherwise PowerShell.
+
+Commands that keep running (dev servers, watchers) are started with `background=true`: Warden returns after their first output, the `job` tool reads their latest output or stops them, and Warden stops them all when it exits. A command that runs too long is stopped together with everything it started, so Warden never hangs on it.
 
 ## Safety
 
@@ -133,6 +138,9 @@ If a `WARDEN.md`, `AGENTS.md` or `CLAUDE.md` exists in the folder, its contents 
     "mode": "ask",
     "maxSteps": 60,
     "contextTokens": 120000,
+    "requestTimeoutSec": 180,
+    "idleTimeoutSec": 120,
+    "stallTimeoutSec": 300,
     "providers": {
       "deepseek": { "api": "openai", "baseUrl": "https://api.deepseek.com/v1", "keyEnv": ["DEEPSEEK_API_KEY"] }
     }
@@ -141,6 +149,8 @@ If a `WARDEN.md`, `AGENTS.md` or `CLAUDE.md` exists in the folder, its contents 
 ```
 
 Any OpenAI-compatible server can be added under `providers` and used as `name/model`.
+
+The timeouts stop a model request that hangs: no response at all after `requestTimeoutSec` (tried twice), a reply that goes silent for `idleTimeoutSec`, or a connection that sends only keep-alive pings for `stallTimeoutSec`. Your conversation is kept; send the message again.
 
 ## Supervisor tools (from Warden 0.1)
 
@@ -156,7 +166,8 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, hook configuration and
 
 ## What is verified
 
-- `npm test` runs offline: a mock model server that streams tool calls, the real tools on a temp project, permissions, rate-limit retries, interrupts, saved sessions, the terminal app driven through a pipe, and the supervisor tests.
+- `npm test` runs offline: a mock model server that streams tool calls, the real tools on a temp project, permissions, rate-limit retries, interrupts, timeouts (no response, silent stream, keep-alive only), reasoning streams, cut-off replies, saved sessions, background jobs, the terminal app driven through a pipe, and the supervisor tests.
+- The interactive app is also tested on a simulated terminal with real keystrokes: chatting turn after turn, typing while the model works, Esc and Ctrl+C (also during an approval question), a model that stops responding, and continuing after each.
 - **Live:** Gemini 2.5 Flash through Google's OpenAI-compatible endpoint. It found, read and fixed a bug, streamed its answer, asked for approval, and respected a denial. The `/add` tool test identified it as native tool calling. Its free daily quota (20 requests) ran out during testing, which is how the quota handling was found and fixed.
 - **Live model lists:** OpenRouter (466 models, 16 free), Hugging Face (126, free monthly credits rather than free models) and NVIDIA (65 chat models) were listed through Warden's own code without keys.
 - **Not tested live:** chatting through OpenRouter, Hugging Face, NVIDIA, Groq, Cerebras, Mistral, DeepSeek, Ollama, LM Studio, OpenAI and Anthropic (no keys or local servers were available). The text tool format was tested against a mock model only. They use the same code path as Gemini (except Anthropic, which has its own).

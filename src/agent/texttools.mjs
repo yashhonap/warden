@@ -54,9 +54,15 @@ export function parseTextToolCalls(reply, idPrefix = "tc") {
     toolCalls.push(name ? { id: `${idPrefix}_${Date.now().toString(36)}_${n++}`, name: String(name), args: typeof args === "string" ? safeJson(args) : args }
       : { id: `${idPrefix}_${Date.now().toString(36)}_${n++}`, name: "__invalid__", args: { __invalid_json: body } });
   }
-  const text = reply.replace(re, "").replace(/<tool_call>[\s\S]*$/, "").replace(/\n{3,}/g, "\n\n").trim();
+  // a <tool_call> that never closed was cut off (usually by the output limit): report it instead of dropping it silently
+  const rest = reply.replace(re, "");
+  const open = rest.indexOf("<tool_call>");
+  if (open >= 0) toolCalls.push({ id: `${idPrefix}_${Date.now().toString(36)}_${n++}`, name: guessName(rest.slice(open)), args: { __invalid_json: rest.slice(open + 11, open + 211), __truncated: true } });
+  const text = rest.replace(/<tool_call>[\s\S]*$/, "").replace(/\n{3,}/g, "\n\n").trim();
   return { text, toolCalls };
 }
+
+const guessName = (s) => s.match(/"name"\s*:\s*"([\w-]+)"/)?.[1] || "__invalid__";
 
 function safeJson(s) { try { return JSON.parse(s); } catch { return { __invalid_json: s }; } }
 

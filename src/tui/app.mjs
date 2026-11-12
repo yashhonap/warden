@@ -1,12 +1,13 @@
 // Warden interactive terminal app: chat with any model, which reads, edits and runs code in this folder.
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { C, MarkdownStream, Spinner, toolHeader, toolBody, fmtTokens } from "./render.mjs";
+import { Writable } from "node:stream";
+import { C, MarkdownStream, Spinner, toolHeader, toolBody, fmtTokens, stripAnsi } from "./render.mjs";
 import { runTurn } from "../agent/loop.mjs";
 import { Session } from "../agent/session.mjs";
 import { loadAgentConfig, saveAgentConfig, pickDefaultModel, CONFIG_FILE } from "../agent/config.mjs";
 import { parseModelSpec, keyStatus, listModels, resolveProvider } from "../agent/providers.mjs";
-import { MODES, detectShell } from "../agent/tools.mjs";
+import { MODES, detectShell, listJobs, stopJob, jobRunning, describeJob } from "../agent/tools.mjs";
 import { CATALOG, ADD_ORDER } from "../agent/catalog.mjs";
 import { saveKey, removeKey, mask, CREDENTIALS_FILE } from "../agent/credentials.mjs";
 import { savedModels, findModel, resolveModelInput, addModel, removeModel, removeModelsOf, suggestName, probeToolSupport } from "../agent/models.mjs";
@@ -24,6 +25,7 @@ const COMMANDS = {
   "/clear": "start a new conversation",
   "/resume": "continue an earlier conversation",
   "/usage": "tokens used in this conversation",
+  "/jobs": "background commands the model started (dev servers…); /jobs stop <id>",
   "/init": "have the model write a WARDEN.md with notes about this project",
   "/exit": "quit (also ctrl+d)",
 };
@@ -56,7 +58,28 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
   });
   const promptStr = () => `${C.accent("›")} `;
   rl.setPrompt(promptStr());
-  const ask = (q) => new Promise((res) => rl.question(q, (a) => res(a)));
+  // While the model works, readline keeps reading keys (so you can type your next message) but draws them into this
+  // silent stream instead of the screen, where they would mix with the model's output. What you type shows in the
+  // status line; Enter queues it for the model.
+  const sink = new Writable({ write(_c, _e, cb) { cb(); } });
+  sink.isTTY = true;
+  Object.defineProperty(sink, "columns", { get: () => out.columns || 80 });
+  const echo = (on) => { if (tty) rl.output = on ? out : sink; };
+  let questions = 0, cancelQuestion = null;
+  // A question during a turn (approve this edit?) must not pick up the half-typed next message, and must be
+  // answerable even though echo is off; esc / ctrl+c cancels it.
+  const ask = (q) => new Promise((res) => {
+    const draft = rl.line || "";
+    rl.line = ""; rl.cursor = 0;
+    questions++; echo(true);
+    cancelQuestion = () => { rl.line = ""; rl.cursor = 0; rl.write("\n"); };
+    rl.question(q, (a) => {
+      questions--; cancelQuestion = null;
+      if (busy && !questions) echo(false);
+      rl.line = draft; rl.cursor = draft.length;
+      res(a);
+    });
+  });
   // In piped mode a question takes the next input line, waiting for it if it has not arrived yet
   // (end of input = the default). Lines never leak past a question into the conversation.
   const waiters = [];
@@ -84,10 +107,16 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
   banner();
   if (session.messages.length) console.log(C.dim(`  Resumed "${session.title || session.id}" (${session.messages.length} messages)\n`));
 
-  // shift+tab cycles the permission mode while idle
+  // shift+tab cycles the permission mode while idle; esc interrupts the model (like ctrl+c)
   if (tty) {
     readline.emitKeypressEvents(process.stdin, rl);
     process.stdin.on("keypress", (_s, key) => {
+      if (key?.name === "escape") {
+        // readline has just put the raw ESC character into the input line; take it out again
+        if (rl.line.includes("\x1b")) { const before = rl.line.slice(0, rl.cursor).replace(/\x1b/g, ""); rl.line = rl.line.replace(/\x1b/g, ""); rl.cursor = before.length; }
+        if (busy) interrupt(); else rl.prompt(true);
+        return;
+      }
       if (!busy && key?.name === "tab" && key.shift) {
         perm.mode = MODES[(MODES.indexOf(perm.mode) + 1) % MODES.length];
         readline.clearLine(out, 0); readline.cursorTo(out, 0);
@@ -97,8 +126,24 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
     });
   }
 
+  // Stops the running turn. Also answers an open approval question with "no" so nothing waits for Enter.
+  function interrupt() {
+    if (!busy || !controller) return false;
+    if (controller.signal.aborted) return true;
+    controller.abort();
+    status.print(C.yellow("  Interrupting…"));
+    cancelQuestion?.();
+    return true;
+  }
+
   rl.on("SIGINT", () => {
-    if (busy && controller) { controller.abort(); out.write(C.yellow("\n  Interrupting…\n")); return; }
+    if (busy && controller) {
+      // a second ctrl+c while still stopping quits, in case something refuses to stop
+      if (controller.signal.aborted && Date.now() - lastSigint < 2000) { out.write(C.red("\n  Quitting.\n")); return quit(); }
+      lastSigint = Date.now();
+      interrupt();
+      return;
+    }
     if (rl.line) { rl.write(null, { ctrl: true, name: "u" }); return; }
     if (Date.now() - lastSigint < 1500) return quit();
     lastSigint = Date.now();
@@ -110,7 +155,10 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
   async function drain() {
     if (draining) return;
     draining = true;
-    while (queue.length) await handle(queue.shift());
+    while (queue.length) {
+      try { await handle(queue.shift()); }
+      catch (e) { status.stop(); console.log(C.red(`  Something went wrong: ${e?.message || e}\n`)); }
+    }
     draining = false;
     if (closed) quit();
   }
@@ -126,13 +174,62 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
       if (waiters.length) { waiters.shift().res(line); return; } // a question is waiting for this line
       queue.push(line); drain(); return;
     }
-    if (busy) return; // typing while the model works is ignored; ctrl+c interrupts
+    if (busy) { queueWhileBusy(line); return; }
     // Lines that arrive within a few ms are one pasted message; a trailing "\" continues on the next line.
     pending.push(line);
     clearTimeout(flushTimer);
     if (line.endsWith("\\")) { pending[pending.length - 1] = line.slice(0, -1); rl.setPrompt(C.dim("… ")); rl.prompt(); return; }
-    flushTimer = setTimeout(() => { const text = pending.join("\n"); pending = []; rl.setPrompt(promptStr()); handle(text).then(() => { if (closed) quit(); else rl.prompt(); }); }, 25);
+    flushTimer = setTimeout(() => { const text = pending.join("\n"); pending = []; rl.setPrompt(promptStr()); runInput(text); }, 25);
   });
+
+  // Runs one message or command, never leaving you without a prompt, even if something throws.
+  async function runInput(text) {
+    try { await handle(text); }
+    catch (e) { status.stop(); console.log(C.red(`  Something went wrong: ${e?.message || e}`) + C.dim("\n  Warden is still running; you can keep chatting.\n")); }
+    if (closed) return quit();
+    afterTurn();
+  }
+
+  // Back to the prompt. Messages typed during the turn that the model never got (it was interrupted, failed, or
+  // finished in the same moment) go back on the prompt line to send, edit or clear.
+  function afterTurn() {
+    if (!tty) return;
+    echo(true);
+    rl.prevRows = 0; // readline measured the draft against the silent stream; draw on a fresh line
+    const left = takeQueued();
+    if (left) {
+      const draft = left.replace(/\n/g, " ") + (rl.line ? " " + rl.line : "");
+      rl.line = draft; rl.cursor = draft.length;
+      console.log(C.dim("  Your message was not sent yet; it is on the prompt below. Press enter to send it, or ctrl+c to clear it."));
+    }
+    rl.prompt(true);
+  }
+
+  // Lines typed while the model works.
+  const typed = [];
+  function takeQueued() { if (!typed.length) return null; const t = typed.join("\n"); typed.length = 0; return t; }
+  function queueWhileBusy(line) {
+    const t = line.trim();
+    if (!t || questions) return;
+    if (t.startsWith("/") || t.startsWith("!")) {
+      status.note(C.yellow(`  ${t.split(/\s+/)[0]} has to wait until Warden is idle. Press esc to interrupt, or type it again when it is done.`));
+      return;
+    }
+    typed.push(t);
+    status.note(`  ${C.accent("↳")} ${C.dim("queued; the model gets it at its next step:")} ${t.length > 120 ? t.slice(0, 120) + "…" : t}`);
+  }
+
+  // The status line during a turn: one spinner shared by thinking, writing and running tools. Notes printed while
+  // the model is streaming text wait until the text ends, so they never land in the middle of a sentence.
+  const status = {
+    spin: new Spinner(out, C, { hint: "esc to interrupt", extra: () => (rl.line ? ` · ✎ ${rl.line}` : typed.length ? ` · ${typed.length} queued` : "") }),
+    streaming: false, later: [],
+    start(label) { this.spin.stop(); this.spin.start(label); },
+    stop() { this.spin.stop(); },
+    print(line) { if (this.streaming) this.later.push(line); else this.spin.print(line); },
+    note(line) { this.print(line); },
+    flush() { const l = this.later; this.later = []; for (const x of l) this.spin.print(x); },
+  };
 
   // First run (no usable key for the current model): walk the person through getting one, then start.
   (async () => {
@@ -166,20 +263,41 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
 
   async function turn(text) {
     busy = true; controller = new AbortController();
+    echo(false);
     const md = new MarkdownStream(out, C);
-    const spin = new Spinner(out, C);
     const t0 = Date.now(), before = { ...session.usage };
-    let streaming = false;
+    const modelName = findModel(cfg, session.model)?.name || session.model;
+    let reasoning = 0, writing = null, toolOut = "";
     console.log();
+    // what the status line says while the model works
+    const thinkingLabel = () => {
+      if (writing) return `Writing ${writing.what} (${fmtChars(writing.chars)})`;
+      if (reasoning) return `Thinking (${fmtChars(reasoning)} of reasoning)`;
+      return status.spin.elapsed() > 20_000 ? `Waiting for ${modelName} (no reply yet)` : "Thinking";
+    };
+    const endText = () => { if (status.streaming) { status.streaming = false; if (md.end()) out.write("\n"); status.flush(); } };
     const ui = {
-      onAssistantStart: () => { spin.start("Thinking"); streaming = false; },
-      onText: (d) => { if (!streaming) { spin.stop(); streaming = true; } md.write(d); },
-      onAssistantEnd: () => { spin.stop(); if (md.end()) out.write("\n"); },
-      onRetry: ({ status, waitMs, attempt }) => spin.setLabel(`Rate limited (${status}), retrying in ${Math.round(waitMs / 1000)}s, attempt ${attempt}`),
-      onNotice: (m) => console.log(C.dim(`  ${m}\n`)),
-      onToolStart: (call, tool) => { spin.stop(); call._shown = false; },
+      onAssistantStart: () => { reasoning = 0; writing = null; status.start(thinkingLabel); },
+      onReasoning: (d) => { reasoning += d.length; },
+      onToolDelta: (name, args) => {
+        if (status.streaming) { endText(); status.start(thinkingLabel); }
+        const file = /"path"\s*:\s*"([^"]{1,120})"/.exec(args || "")?.[1];
+        writing = { what: file ? file.replace(/\\\\/g, "\\") : name || "a tool call", chars: (args || "").length }; // JSON doubles backslashes in Windows paths
+      },
+      onText: (d) => { if (!status.streaming) { status.stop(); status.streaming = true; } md.write(d); },
+      onAssistantEnd: () => { status.stop(); endText(); },
+      onRetry: ({ status: st, waitMs, attempt }) => status.spin.setLabel(st === "no response" ? `${modelName} did not respond; trying again` : `Rate limited (${st}), retrying in ${Math.round(waitMs / 1000)}s, attempt ${attempt}`),
+      onNotice: (m) => status.print(C.dim(`  ${m}\n`)),
+      takeQueued: () => (tty ? takeQueued() : null),
+      onQueuedDelivered: (t) => { endText(); status.stop(); console.log(`${C.accent("›")} ${t}  ${C.gray("(sent while Warden was working)")}\n`); },
+      onToolStart: (call, tool) => {
+        status.stop(); call._shown = false; toolOut = "";
+        status.start(() => `${defaultTitle(tool, call.args).slice(0, 70)}${toolOut ? " · " + toolOut : ""}`);
+      },
+      onToolApproved: (call, tool) => { status.start(() => `Running ${defaultTitle(tool, call.args).slice(0, 60)}${toolOut ? " · " + toolOut : ""}`); },
+      onToolOutput: (call, s) => { const last = stripAnsi(s).split(/\r?\n|\r/).map((l) => l.trim()).filter(Boolean).pop(); if (last) toolOut = last.slice(0, 80); },
       confirm: async (call, tool, desc) => {
-        spin.stop();
+        status.stop();
         showTool(call, tool, null, "run"); call._shown = true;
         const kind = tool.kind === "bash" ? "Run this command" : tool.kind === "edit" ? "Allow this change" : "Allow reading outside the project";
         if (tool.kind === "edit" && call.args?.old_string !== undefined) previewEdit(call.args);
@@ -193,6 +311,7 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
         }
       },
       onToolEnd: (call, tool, res) => {
+        status.stop();
         const state = res?.denied ? "deny" : res?.error ? "err" : res?.isError ? "err" : "ok";
         showTool(call, tool, res, state, call._shown);
         console.log();
@@ -200,18 +319,22 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
     };
     try {
       const r = await runTurn({ session, userText: text, cfg, ui, perm, signal: controller.signal, cwd });
-      if (r.interrupted) console.log(C.yellow("  Interrupted.\n"));
+      status.stop(); endText();
+      if (r.interrupted) console.log(C.yellow("  Interrupted.") + C.dim(" The conversation is kept; say what to do next.\n"));
     } catch (e) {
-      spin.stop(); md.end();
+      status.stop(); endText();
       console.log(C.red(`  Error: ${e.message}`));
-      if (/API key|no API key/i.test(e.message)) console.log(C.dim(`  Set the key as an environment variable, or pick another model with /model. Providers: /model`));
+      if (e.timeout) console.log(C.dim("  Nothing was lost: your message and everything so far are still in the conversation. Send it again or say \"continue\"."));
+      else if (/API key|no API key/i.test(e.message)) console.log(C.dim(`  Set the key as an environment variable, or pick another model with /model. Providers: /model`));
       else if (/^4(01|03)/.test(e.message)) console.log(C.dim("  The provider rejected the key or the request. Check the key and the model name (/models <provider>)."));
       else if (/^404/.test(e.message)) console.log(C.dim("  Model not found. See what this provider offers with /models <provider>."));
       else if (/^429/.test(e.message)) console.log(C.dim("  This model's rate limit or free quota is used up. Switch with /model (another model usually has its own quota), or /add a free one."));
+      else if (/^413|too large|context length|maximum context|too many tokens/i.test(e.message)) console.log(C.dim("  The conversation got too long for this model. Start a fresh one with /clear (your files are unchanged), or pick a model with a bigger context."));
       console.log();
     } finally {
-      spin.stop();
+      status.stop(); status.streaming = false; status.later = [];
       busy = false; controller = null;
+      echo(true); rl.prevRows = 0; // whatever started this turn (typed, `warden "task"`, /init), typing is visible again
       const u = session.usage;
       const tin = u.input - before.input, tout = u.output - before.output;
       console.log(C.gray(`  ${session.model} · ${tin || tout ? `${fmtTokens(tin)} in / ${fmtTokens(tout)} out · ` : ""}${((Date.now() - t0) / 1000).toFixed(1)}s · ${modeLabel(perm.mode)}`));
@@ -257,8 +380,24 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
         console.log();
         for (const [k, v] of Object.entries(COMMANDS)) console.log(`  ${C.accent(k.padEnd(9))} ${C.dim(v)}`);
         console.log(`  ${C.accent("!cmd".padEnd(9))} ${C.dim("run a shell command yourself; the model sees the output")}`);
-        console.log(C.dim(`\n  Keys: ctrl+c interrupts the model (twice at an empty prompt quits) · shift+tab cycles the mode · end a line with \\ for multi-line\n  Settings: ${CONFIG_FILE}\n`));
+        console.log(C.dim(`\n  While the model works: keep typing and press enter to queue a message (it gets it at its next step) · esc or ctrl+c interrupts`));
+        console.log(C.dim(`  Keys: ctrl+c twice at an empty prompt quits · shift+tab cycles the mode · end a line with \\ for multi-line\n  Settings: ${CONFIG_FILE}\n`));
         break;
+      case "/jobs": {
+        const jobs = listJobs();
+        const [sub, id] = arg.split(/\s+/);
+        if (sub === "stop") {
+          const targets = id === "all" || !id ? jobs.filter(jobRunning) : jobs.filter((j) => String(j.id) === id);
+          if (!targets.length) { console.log(C.dim(`  ${id && id !== "all" ? `No job ${id}.` : "Nothing running."}\n`)); break; }
+          for (const j of targets) { stopJob(j); console.log(C.dim(`  Stopped job ${j.id}: ${j.command}`)); }
+          console.log(); break;
+        }
+        if (!jobs.length) { console.log(C.dim("  No background jobs. The model starts one when it runs a server or watcher.\n")); break; }
+        console.log();
+        for (const j of jobs) console.log(`  ${jobRunning(j) ? C.mint("●") : C.gray("○")} ${describeJob(j)}`);
+        console.log(C.dim("\n  /jobs stop <id> or /jobs stop all. Warden stops them all when it exits.\n"));
+        break;
+      }
       case "/exit": case "/quit": closed = true; break;
       case "/clear":
         session = new Session({ cwd, model: session.model }); perm.allowed.clear();
@@ -465,7 +604,7 @@ export async function startApp({ cwd = process.cwd(), model, mode, resume, initi
     console.log(`  ${C.gray("model")}  ${session.model} ${/missing/.test(st) ? C.red(`(${st})`) : C.gray(`(${st})`)}`);
     console.log(`  ${C.gray("mode ")}  ${modeLabel(perm.mode)} ${C.gray("(shift+tab or /mode)")}`);
     console.log(`  ${C.gray("dir  ")}  ${cwd}`);
-    console.log(C.gray(`  /help for commands · /model to switch models · ctrl+c to interrupt`));
+    console.log(C.gray(`  /help for commands · /model to switch models · esc interrupts · type while it works to queue a message`));
     const upd = updateNotice(cfg);
     if (upd) console.log(C.yellow(`  Warden ${upd} is available (you have ${VERSION}). Run: warden update`));
     console.log();
@@ -485,6 +624,7 @@ function latestFor(cwd) {
   return Session.load(s.id);
 }
 
+const fmtChars = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k chars` : `${n} chars`);
 const toolTag = (t) => (t === "none" ? C.yellow("  chat only") : t === "text" ? C.gray("  text tools") : "");
 const fmtCtx = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M` : `${Math.round(n / 1000)}k`);
 const modelFlags = (m) => {
